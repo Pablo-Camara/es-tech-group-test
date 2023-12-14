@@ -11,10 +11,15 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('users', function (Blueprint $table) {
-            $table->string('ref', 12)->primary();
+        Schema::create('account_users', function (Blueprint $table) {
+            $table->string('account_ref', 14);
+            $table->string('user_ref', 12);
+
             $table->timestamp('created_at')->useCurrent();
             $table->timestamp('updated_at')->useCurrent()->useCurrentOnUpdate();
+
+            $table->foreign('account_ref')->references('ref')->on('accounts')->onDelete('cascade');
+            $table->foreign('user_ref')->references('ref')->on('users')->onDelete('cascade');
         });
     }
 
@@ -23,6 +28,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('users');
+        Schema::dropIfExists('account_users');
     }
 };
