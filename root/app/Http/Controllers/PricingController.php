@@ -37,8 +37,8 @@ class PricingController extends Controller
         );
 
         return response()->json(array_merge(
-            $selectedPricesFromDb,
-            $selectedPricesFromJson
+            $selectedPricesFromJson,
+            $selectedPricesFromDb
         ), Response::HTTP_OK);
     }
 
