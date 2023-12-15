@@ -2,10 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Price;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\DB;
 
 class PricingController extends Controller
 {
@@ -21,40 +22,24 @@ class PricingController extends Controller
             return response()->json([], Response::HTTP_BAD_REQUEST);
         }
 
-        $jsonData = $this->getLivePricingFromJsonFeed();
+        $selectedPricesFromJson = $this->getSelectedPricesFromJsonFeed(
+            $isPublicPrice,
+            $products,
+            $accountId
+        );
 
-        $selectedPrices = [];
-        if (!empty($jsonData)) {
 
-            foreach ($jsonData as $row) {
-                $row['price'] = number_format(round($row['price'], 2), 2);
-
-                if (!$isPublicPrice) {
-                    if (
-                        in_array($row['sku'], $products)
-                        &&
-                        (isset($row['account']) && $row['account'] === $accountId)
-                    ) {
-                        $selectedPrices[] = $row;
-                    }
-                    continue;
-                }
-
-                if (
-                    in_array($row['sku'], $products)
-                    &&
-                    (!isset($row['account']) || empty($row['account']))
-                ) {
-                    $selectedPrices[] = $row;
-                }
-            }
+        if (!empty($selectedPricesFromJson)) {
+            return response()->json($selectedPricesFromJson, Response::HTTP_OK);
         }
 
-        if (!empty($selectedPrices)) {
-            return response()->json($selectedPrices, Response::HTTP_OK);
-        }
+        $selectedPricesFromDb = $this->getSelectedPricesFromDb(
+            $isPublicPrice,
+            $products,
+            $accountId
+        );
 
-        return response()->json(null, Response::HTTP_OK);
+        return response()->json($selectedPricesFromDb, Response::HTTP_OK);
     }
 
 
@@ -87,5 +72,67 @@ class PricingController extends Controller
         }
 
         return $jsonData;
+    }
+
+    private function getSelectedPricesFromJsonFeed($isPublicPrice, $products, $accountId) {
+        $jsonData = $this->getLivePricingFromJsonFeed();
+        $selectedPrices = [];
+        if (!empty($jsonData)) {
+            $skusAdded = [];
+            foreach ($jsonData as $row) {
+                $row['price'] = number_format(round($row['price'], 2), 2);
+
+                if (!$isPublicPrice) {
+                    if (
+                        in_array($row['sku'], $products)
+                        &&
+                        (isset($row['account']) && $row['account'] === $accountId)
+                        &&
+                        !in_array($row['sku'], $skusAdded)
+                    ) {
+                        $selectedPrices[] = $row;
+                        $skusAdded[] = $row['sku'];
+                    }
+                    continue;
+                }
+
+                if (
+                    in_array($row['sku'], $products)
+                    &&
+                    (!isset($row['account']) || empty($row['account']))
+                    &&
+                    !in_array($row['sku'], $skusAdded)
+                ) {
+                    $selectedPrices[] = $row;
+                    $skusAdded[] = $row['sku'];
+                }
+            }
+        }
+        return $selectedPrices;
+    }
+
+    private function getSelectedPricesFromDb($isPublicPrice, $products, $accountId) {
+        if ($isPublicPrice) {
+            $results = Price::whereIn('sku', $products)
+                ->whereNull('account_ref')
+                ->groupBy('sku')
+                ->select([
+                    'sku',
+                    DB::raw('ROUND(MIN(value), 2) as price')
+                ])
+                ->get();
+
+            return $results->toArray();
+        }
+
+        return Price::whereIn('sku', $products)
+            ->where('account_ref', $accountId)
+            ->groupBy(['sku', 'account_ref'])
+            ->select([
+                'sku',
+                'account_ref AS account',
+                DB::raw('ROUND(MIN(value), 2) as price')
+            ])
+            ->get()->toArray();
     }
 }
