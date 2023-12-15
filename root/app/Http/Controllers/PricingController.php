@@ -21,25 +21,25 @@ class PricingController extends Controller
         if (empty($products)) {
             return response()->json([], Response::HTTP_BAD_REQUEST);
         }
-
+        $skusAdded = [];
         $selectedPricesFromJson = $this->getSelectedPricesFromJsonFeed(
             $isPublicPrice,
             $products,
-            $accountId
+            $accountId,
+            $skusAdded
         );
-
-
-        if (!empty($selectedPricesFromJson)) {
-            return response()->json($selectedPricesFromJson, Response::HTTP_OK);
-        }
 
         $selectedPricesFromDb = $this->getSelectedPricesFromDb(
             $isPublicPrice,
             $products,
-            $accountId
+            $accountId,
+            $skusAdded
         );
 
-        return response()->json($selectedPricesFromDb, Response::HTTP_OK);
+        return response()->json(array_merge(
+            $selectedPricesFromDb,
+            $selectedPricesFromJson
+        ), Response::HTTP_OK);
     }
 
 
@@ -74,11 +74,10 @@ class PricingController extends Controller
         return $jsonData;
     }
 
-    private function getSelectedPricesFromJsonFeed($isPublicPrice, $products, $accountId) {
+    private function getSelectedPricesFromJsonFeed($isPublicPrice, $products, $accountId,&$skusAdded = []) {
         $jsonData = $this->getLivePricingFromJsonFeed();
         $selectedPrices = [];
         if (!empty($jsonData)) {
-            $skusAdded = [];
             foreach ($jsonData as $row) {
                 $row['price'] = number_format(round($row['price'], 2), 2);
 
@@ -111,7 +110,7 @@ class PricingController extends Controller
         return $selectedPrices;
     }
 
-    private function getSelectedPricesFromDb($isPublicPrice, $products, $accountId) {
+    private function getSelectedPricesFromDb($isPublicPrice, $products, $accountId,&$skusAdded = []) {
         if ($isPublicPrice) {
             $results = Price::whereIn('sku', $products)
                 ->whereNull('account_ref')
@@ -122,10 +121,18 @@ class PricingController extends Controller
                 ])
                 ->get();
 
-            return $results->toArray();
+            $resultsFinal = [];
+            foreach($results->toArray() as $row) {
+                if (!in_array($row['sku'], $skusAdded)) {
+                    $resultsFinal[] = $row;
+                    $skusAdded[] = $row['sku'];
+                }
+            };
+            return $resultsFinal;
         }
 
-        return Price::whereIn('sku', $products)
+        $resultsFinal = [];
+        $results = Price::whereIn('sku', $products)
             ->where('account_ref', $accountId)
             ->groupBy(['sku', 'account_ref'])
             ->select([
@@ -134,5 +141,13 @@ class PricingController extends Controller
                 DB::raw('ROUND(MIN(value), 2) as price')
             ])
             ->get()->toArray();
+
+        foreach ($results as $row) {
+            if (!in_array($row['sku'], $skusAdded)) {
+                $resultsFinal[] = $row;
+                $skusAdded[] = $row['sku'];
+            }
+        }
+        return $resultsFinal;
     }
 }
